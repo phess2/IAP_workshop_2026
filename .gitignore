@@ -1,1 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual env / uv
+.venv/
+.python-version
+
+# Tests / tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Secrets
 .env
+.env.*
