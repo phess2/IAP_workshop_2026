@@ -21,3 +21,6 @@ __pycache__/
 # Secrets
 .env
 .env.*
+
+# Notion state
+.workshop1_state.json

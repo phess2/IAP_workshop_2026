@@ -8,6 +8,8 @@ dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.1",
+    "openai>=1.0.0",
+    "notion-client>=2.0.0",
 ]
 
 [dependency-groups]
