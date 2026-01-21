@@ -18,5 +18,7 @@ class Settings(BaseModel):
     mastodon_base_url: str = os.environ.get("MASTODON_BASE_URL", "")
     mastodon_access_token: str = os.environ.get("MASTODON_ACCESS_TOKEN", "")
 
+    replicate_api_token: str = os.environ.get("REPLICATE_API_TOKEN", "")
+
 
 settings = Settings()

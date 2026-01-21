@@ -3,8 +3,9 @@ from datetime import datetime
 from pathlib import Path
 
 from .notion_client import fetch_parent_page, fetch_child_pages, NotionPage
-from .mastodon_client import post_status
-from .llm import generate_post
+from .mastodon_client import post_status, upload_media
+from .llm import generate_post, generate_image_prompt
+from .replicate_client import generate_image
 
 STATE_FILE = Path(".workshop1_state.json")
 
@@ -121,7 +122,21 @@ def main() -> None:
 
         if get_approval():
             try:
-                result = post_status(post_content)
+                # Generate image prompt
+                print("\n🎨 Generating image prompt...")
+                image_prompt = generate_image_prompt(post_content)
+                print(f"📝 Image prompt: {image_prompt}")
+
+                # Generate image
+                print("🖼️  Generating image...")
+                image_url = generate_image(image_prompt)
+                print(f"✅ Image generated: {image_url}")
+
+                # Upload to Mastodon
+                media_id = upload_media(image_url)
+
+                # Post with media
+                result = post_status(post_content, media_ids=[media_id])
                 print(f"✅ Posted! URL: {result.url}")
 
                 # Update state
@@ -135,6 +150,20 @@ def main() -> None:
 
             except Exception as e:
                 print(f"❌ Error posting to Mastodon: {e}")
+                # If image generation fails, try posting text-only as fallback
+                print("⚠️  Attempting to post text-only as fallback...")
+                try:
+                    result = post_status(post_content)
+                    print(f"✅ Posted (text-only)! URL: {result.url}")
+                    state["pages"][page.id] = {
+                        "title": page.title,
+                        "last_edited_time": page.last_edited_time.isoformat(),
+                        "last_posted_time": datetime.now().isoformat(),
+                    }
+                    save_state(state)
+                    posts_made += 1
+                except Exception as fallback_error:
+                    print(f"❌ Fallback post also failed: {fallback_error}")
         else:
             print("⏭️  Skipped.")
 

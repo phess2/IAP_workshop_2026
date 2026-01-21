@@ -24,3 +24,6 @@ __pycache__/
 
 # Notion state
 .workshop1_state.json
+
+# Images for finetuning
+workshop2/dataset/*

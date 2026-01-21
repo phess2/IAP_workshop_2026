@@ -3,7 +3,9 @@ from workshop1.llm import generate_post, generate_reply
 
 def test_generate_post():
     """Test generating a Mastodon post."""
-    business_context = "A small coffee shop focused on sustainable sourcing and community building."
+    business_context = (
+        "A small coffee shop focused on sustainable sourcing and community building."
+    )
     page_content = "We just launched our new seasonal blend featuring beans from Colombia and Ethiopia. The blend has notes of chocolate and citrus, perfect for the winter months."
     page_title = "New Seasonal Blend Launch"
 
@@ -28,7 +30,9 @@ def test_generate_reply():
     """Test generating a Mastodon reply."""
     post_content = "Just finished reading an amazing book about sustainable agriculture. The future of farming is so exciting!"
     post_author = "@sustainable_farmer"
-    business_context = "A small coffee shop focused on sustainable sourcing and community building."
+    business_context = (
+        "A small coffee shop focused on sustainable sourcing and community building."
+    )
 
     reply = generate_reply(
         post_content=post_content,

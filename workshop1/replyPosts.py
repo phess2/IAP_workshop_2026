@@ -182,7 +182,11 @@ def main() -> None:
     for i, (post, reply) in enumerate(successful_pairs, 1):
         print(f"\n[{i}/{len(successful_pairs)}]")
         print(f"👤 {post.author} ({post.author_handle})")
-        print(f"📝 Original: {post.content[:100]}..." if len(post.content) > 100 else f"📝 Original: {post.content}")
+        print(
+            f"📝 Original: {post.content[:100]}..."
+            if len(post.content) > 100
+            else f"📝 Original: {post.content}"
+        )
         print(f"💬 Reply: {reply}")
 
         approval = get_approval()

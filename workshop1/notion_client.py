@@ -58,13 +58,14 @@ def _get_page_title(page: dict) -> str:
     """Extract title from a Notion page."""
     properties = page.get("properties", {})
 
-    if 'title' in properties:
-        title_prop = properties['title']
+    if "title" in properties:
+        title_prop = properties["title"]
         if title_prop.get("type") == "title":
             title_arr = title_prop.get("title", [])
             return title_arr[0].get("text", {}).get("content", "Untitled")
 
     return "Untitled"
+
 
 def fetch_parent_page() -> NotionPage:
     """
@@ -89,7 +90,7 @@ def fetch_parent_page() -> NotionPage:
     for block in blocks:
         if block.get("type") == "child_page":
             title = block.get("child_page").get("title")
-            if title == 'Overall Account Description':
+            if title == "Overall Account Description":
                 main_page_id = block.get("id")
                 break
     main_blocks_response = client.blocks.children.list(block_id=main_page_id)
@@ -122,7 +123,7 @@ def fetch_child_pages() -> list[NotionPage]:
 
     for block in blocks:
         if block.get("type") == "child_page":
-            if block.get("child_page").get("title") == 'Overall Account Description':
+            if block.get("child_page").get("title") == "Overall Account Description":
                 continue
 
             child_id = block["id"]
