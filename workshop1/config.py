@@ -20,5 +20,7 @@ class Settings(BaseModel):
 
     replicate_api_token: str = os.environ.get("REPLICATE_API_TOKEN", "")
 
+    telegram_bot_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    telegram_chat_id: str = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 settings = Settings()

@@ -11,6 +11,7 @@ dependencies = [
     "openai>=1.0.0",
     "notion-client>=2.0.0",
     "replicate>=0.10.0",
+    "python-telegram-bot>=21.0",
 ]
 
 [dependency-groups]

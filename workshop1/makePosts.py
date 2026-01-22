@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
@@ -6,6 +7,7 @@ from .notion_client import fetch_parent_page, fetch_child_pages, NotionPage
 from .mastodon_client import post_status, upload_media
 from .llm import generate_post, generate_image_prompt
 from .replicate_client import generate_image
+from .telegram_client import request_approval, store_rejection, Decision
 
 STATE_FILE = Path(".workshop1_state.json")
 
@@ -51,19 +53,94 @@ def print_preview(post_content: str, page: NotionPage) -> None:
     print()
 
 
-def get_approval() -> bool:
-    """Prompt user for approval."""
-    while True:
-        response = input("Post this? (y/n): ").strip().lower()
-        if response in ("y", "yes"):
+async def process_post(
+    post_content: str,
+    page: NotionPage,
+    state: dict,
+) -> bool:
+    """
+    Process a single post through Telegram approval workflow.
+
+    Returns True if post was made, False otherwise.
+    """
+    # Request approval via Telegram
+    context_info = f"📄 Source: {page.title}"
+    result = await request_approval(
+        content=post_content,
+        context_info=context_info,
+        content_type="post",
+    )
+
+    # Determine which content to post (original or edited)
+    if result.decision == Decision.ACCEPT:
+        content_to_post = post_content
+        print("✅ Post approved!")
+    elif result.decision == Decision.EDIT:
+        content_to_post = result.edited_content
+        print(f"✏️ Post edited! New content: {content_to_post[:100]}...")
+    elif result.decision == Decision.REJECT:
+        # Store the rejection feedback
+        store_rejection(
+            original_content=post_content,
+            feedback=result.feedback or "No reason provided",
+            content_type="post",
+            page_title=page.title,
+        )
+        print(f"❌ Post rejected. Feedback: {result.feedback}")
+        return False
+    else:
+        print("⏭️ Skipped.")
+        return False
+
+    # Generate image and post
+    try:
+        # Generate image prompt based on the content we're posting
+        print("\n🎨 Generating image prompt...")
+        image_prompt = generate_image_prompt(content_to_post)
+        print(f"📝 Image prompt: {image_prompt}")
+
+        # Generate image
+        print("🖼️  Generating image...")
+        image_url = generate_image(image_prompt)
+        print(f"✅ Image generated: {image_url}")
+
+        # Upload to Mastodon
+        media_id = upload_media(image_url)
+
+        # Post with media
+        result = post_status(content_to_post, media_ids=[media_id])
+        print(f"✅ Posted! URL: {result.url}")
+
+        # Update state
+        state["pages"][page.id] = {
+            "title": page.title,
+            "last_edited_time": page.last_edited_time.isoformat(),
+            "last_posted_time": datetime.now().isoformat(),
+        }
+        save_state(state)
+        return True
+
+    except Exception as e:
+        print(f"❌ Error posting to Mastodon: {e}")
+        # If image generation fails, try posting text-only as fallback
+        print("⚠️  Attempting to post text-only as fallback...")
+        try:
+            result = post_status(content_to_post)
+            print(f"✅ Posted (text-only)! URL: {result.url}")
+            state["pages"][page.id] = {
+                "title": page.title,
+                "last_edited_time": page.last_edited_time.isoformat(),
+                "last_posted_time": datetime.now().isoformat(),
+            }
+            save_state(state)
             return True
-        if response in ("n", "no"):
+        except Exception as fallback_error:
+            print(f"❌ Fallback post also failed: {fallback_error}")
             return False
-        print("Please enter 'y' or 'n'")
 
 
-def main() -> None:
-    """Main entry point for generating posts from Notion updates."""
+async def async_main() -> None:
+    """Async main entry point for generating posts from Notion updates."""
     print("🔄 Loading Notion pages...")
 
     # Load business description (parent page)
@@ -120,54 +197,16 @@ def main() -> None:
 
         print_preview(post_content, page)
 
-        if get_approval():
-            try:
-                # Generate image prompt
-                print("\n🎨 Generating image prompt...")
-                image_prompt = generate_image_prompt(post_content)
-                print(f"📝 Image prompt: {image_prompt}")
-
-                # Generate image
-                print("🖼️  Generating image...")
-                image_url = generate_image(image_prompt)
-                print(f"✅ Image generated: {image_url}")
-
-                # Upload to Mastodon
-                media_id = upload_media(image_url)
-
-                # Post with media
-                result = post_status(post_content, media_ids=[media_id])
-                print(f"✅ Posted! URL: {result.url}")
-
-                # Update state
-                state["pages"][page.id] = {
-                    "title": page.title,
-                    "last_edited_time": page.last_edited_time.isoformat(),
-                    "last_posted_time": datetime.now().isoformat(),
-                }
-                save_state(state)
-                posts_made += 1
-
-            except Exception as e:
-                print(f"❌ Error posting to Mastodon: {e}")
-                # If image generation fails, try posting text-only as fallback
-                print("⚠️  Attempting to post text-only as fallback...")
-                try:
-                    result = post_status(post_content)
-                    print(f"✅ Posted (text-only)! URL: {result.url}")
-                    state["pages"][page.id] = {
-                        "title": page.title,
-                        "last_edited_time": page.last_edited_time.isoformat(),
-                        "last_posted_time": datetime.now().isoformat(),
-                    }
-                    save_state(state)
-                    posts_made += 1
-                except Exception as fallback_error:
-                    print(f"❌ Fallback post also failed: {fallback_error}")
-        else:
-            print("⏭️  Skipped.")
+        # Process through Telegram approval
+        if await process_post(post_content, page, state):
+            posts_made += 1
 
     print(f"\n🎉 Done! Made {posts_made} post(s).")
+
+
+def main() -> None:
+    """Main entry point - runs the async main function."""
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":

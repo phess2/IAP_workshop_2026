@@ -22,8 +22,9 @@ __pycache__/
 .env
 .env.*
 
-# Notion state
+# State files
 .workshop1_state.json
+.workshop_2_feedback.json
 
 # Images for finetuning
 workshop2/dataset/*

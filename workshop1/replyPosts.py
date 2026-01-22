@@ -1,9 +1,11 @@
 import argparse
+import asyncio
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .notion_client import fetch_parent_page
 from .mastodon_client import search_posts, reply_to_status, MastodonPost
 from .llm import generate_reply
+from .telegram_client import request_approval, store_rejection, Decision
 
 # Number of posts to search for and generate replies to
 BATCH_SIZE = 5
@@ -36,24 +38,6 @@ def print_post_with_reply(
     """Print a post and its generated reply together."""
     print_post(post, index, total)
     print_reply_preview(reply_content)
-
-
-def get_approval() -> str:
-    """
-    Prompt user for approval.
-
-    Returns:
-        'y' for yes, 'n' for no, 's' for skip all remaining
-    """
-    while True:
-        response = input("Reply with this? (y/n/skip all): ").strip().lower()
-        if response in ("y", "yes"):
-            return "y"
-        if response in ("n", "no"):
-            return "n"
-        if response in ("s", "skip", "skip all"):
-            return "s"
-        print("Please enter 'y', 'n', or 's' (skip all)")
 
 
 def parse_keywords(keywords_str: str) -> list[str]:
@@ -101,8 +85,70 @@ def generate_replies_batch(
     return [(post, results[post.id][1]) for post in posts if post.id in results]
 
 
-def main() -> None:
-    """Main entry point for searching and replying to posts."""
+async def process_single_reply(
+    post: MastodonPost,
+    reply_content: str,
+    index: int,
+    total: int,
+) -> bool:
+    """
+    Process a single reply through Telegram approval workflow.
+
+    Args:
+        post: The Mastodon post being replied to
+        reply_content: The generated reply content
+        index: Current reply index (1-based)
+        total: Total number of replies
+
+    Returns:
+        True if reply was posted, False otherwise
+    """
+    author = post.author or post.author_handle
+    context_info = (
+        f"[{index}/{total}] 👤 Replying to: {author}\n"
+        f"📝 Original: {post.content[:150]}{'...' if len(post.content) > 150 else ''}"
+    )
+
+    # Request approval via Telegram
+    result = await request_approval(
+        content=reply_content,
+        context_info=context_info,
+        content_type="reply",
+    )
+
+    # Determine which content to post (original or edited)
+    if result.decision == Decision.ACCEPT:
+        content_to_post = reply_content
+        print(f"✅ Reply to {author} approved!")
+    elif result.decision == Decision.EDIT:
+        content_to_post = result.edited_content
+        print(f"✏️ Reply to {author} edited! New content: {content_to_post[:100]}...")
+    elif result.decision == Decision.REJECT:
+        # Store the rejection feedback
+        store_rejection(
+            original_content=reply_content,
+            feedback=result.feedback or "No reason provided",
+            content_type="reply",
+            post_author=author,
+        )
+        print(f"❌ Reply to {author} rejected. Feedback: {result.feedback}")
+        return False
+    else:
+        print(f"⏭️ Reply to {author} skipped.")
+        return False
+
+    # Post the reply
+    try:
+        result = reply_to_status(post.id, content_to_post)
+        print(f"✅ Reply posted! URL: {result.url}")
+        return True
+    except Exception as e:
+        print(f"❌ Error posting reply to {author}: {e}")
+        return False
+
+
+async def async_main() -> None:
+    """Async main entry point for searching and replying to posts."""
     parser = argparse.ArgumentParser(
         description="Search Mastodon for posts and generate replies"
     )
@@ -163,50 +209,24 @@ def main() -> None:
 
     print(f"✅ Generated {len(successful_pairs)} replies\n")
 
-    # Display all previews
+    # Process each reply one at a time via Telegram
     print("\n" + "=" * 60)
-    print("📋 BATCH PREVIEW - All generated replies:")
-    print("=" * 60)
-
-    for i, (post, reply) in enumerate(successful_pairs, 1):
-        print_post_with_reply(post, reply, i, len(successful_pairs))
-        print()
-
-    # Now approve each one individually
-    print("\n" + "=" * 60)
-    print("✋ APPROVAL PHASE - Review each reply:")
+    print("✋ TELEGRAM APPROVAL PHASE - Processing one at a time")
     print("=" * 60)
 
     replies_made = 0
 
     for i, (post, reply) in enumerate(successful_pairs, 1):
-        print(f"\n[{i}/{len(successful_pairs)}]")
-        print(f"👤 {post.author} ({post.author_handle})")
-        print(
-            f"📝 Original: {post.content[:100]}..."
-            if len(post.content) > 100
-            else f"📝 Original: {post.content}"
-        )
-        print(f"💬 Reply: {reply}")
-
-        approval = get_approval()
-
-        if approval == "y":
-            try:
-                result = reply_to_status(post.id, reply)
-                print(f"✅ Replied! URL: {result.url}")
-                replies_made += 1
-            except Exception as e:
-                print(f"❌ Error posting reply: {e}")
-
-        elif approval == "s":
-            print("⏭️  Skipping remaining posts.")
-            break
-
-        else:
-            print("⏭️  Skipped.")
+        print(f"\n[{i}/{len(successful_pairs)}] Processing reply...")
+        if await process_single_reply(post, reply, i, len(successful_pairs)):
+            replies_made += 1
 
     print(f"\n🎉 Done! Made {replies_made} reply(ies).")
+
+
+def main() -> None:
+    """Main entry point - runs the async main function."""
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":
