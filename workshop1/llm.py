@@ -344,6 +344,224 @@ class ImagePromptContent(BaseModel):
     )
 
 
+def generate_post_with_rag(
+    rag_context: str,
+    page_content: str,
+    page_title: str,
+) -> str:
+    """
+    Generate a Mastodon post using RAG context for Octo NeuroAI.
+
+    This function uses retrieved business documentation to create
+    contextually relevant posts about cognitive-inspired AI.
+
+    Args:
+        rag_context: Retrieved context from the RAG system
+        page_content: The content of the updated page (trigger for post)
+        page_title: The title of the updated page
+
+    Returns:
+        Generated post text (max 500 chars), validated by Pydantic
+    """
+    client = _get_client()
+
+    system_prompt = """You are a social media manager for Octo NeuroAI, a company that generates AI experiments and automation workflows for cognitive-inspired AI.
+
+Your task is to create engaging Mastodon posts that:
+- Are concise (under 500 characters)
+- Highlight Octo NeuroAI's innovative, research-driven approach
+- Share valuable insights about cognitive AI, automation, and experiments
+- Include relevant hashtags (#CognitiveAI, #AIAutomation, #NeuralNetworks, etc.)
+- Sound authentic, not salesy
+- Drive engagement and interest in cognitive-inspired AI
+
+Write in a conversational but professional tone. Focus on sharing knowledge and sparking curiosity about how AI can be inspired by cognitive science.
+
+You MUST respond with valid JSON in this exact format:
+{
+  "content": "Your post text here (under 400 chars to leave room for hashtags)",
+  "hashtags": ["CognitiveAI", "AIAutomation", "tag3"]
+}
+
+Provide 1-3 relevant hashtags without the # prefix."""
+
+    user_prompt = f"""Based on the following business documentation and context, create a single engaging Mastodon post that promotes Octo NeuroAI's services or shares valuable AI insights.
+
+RETRIEVED CONTEXT (use this to ground your post):
+{rag_context}
+
+---
+
+NEW CONTENT TO POST ABOUT:
+Title: {page_title}
+
+Content:
+{page_content}
+
+---
+
+Generate just the post as JSON, nothing else."""
+
+    response = client.responses.create(
+        model=settings.openrouter_model,
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+
+    post = _parse_json_response(response.output_text, MastodonPostContent)
+    return post.to_post_text()
+
+
+def generate_reply_with_rag(
+    rag_context: str,
+    post_content: str,
+    post_author: str,
+) -> str:
+    """
+    Generate a reply using RAG context from business documentation.
+
+    This allows replies to reference relevant company information
+    when appropriate, while still maintaining a genuine tone.
+
+    Args:
+        rag_context: Retrieved context from the RAG system
+        post_content: The content of the post to reply to
+        post_author: The author's display name or handle
+
+    Returns:
+        Generated reply text, validated by Pydantic
+    """
+    client = _get_client()
+
+    system_prompt = """You are writing a reply to a Mastodon post on behalf of Octo NeuroAI, a company that generates AI experiments and automation workflows for cognitive-inspired AI.
+
+Your reply should be:
+- Human, warm, and genuine
+- Supportive and connective
+- Brief (1-3 sentences typically)
+- Engaging with what the person actually said
+- Natural conversation, like a real person would respond
+
+When relevant, you can reference your expertise in cognitive-inspired AI and automation workflows, but ONLY if it naturally fits the conversation. Don't force it.
+
+You're building community and genuine connections. Never use corporate speak. Be a real person having a real conversation.
+
+Avoid emojis unless the original post clearly uses them.
+Do not include hashtags in replies.
+
+You MUST respond with valid JSON in this exact format:
+{
+  "content": "Your reply text here"
+}
+
+Just the reply text, nothing else."""
+
+    user_prompt = f"""Your business context (for reference when relevant):
+{rag_context}
+
+---
+
+Post by {post_author}:
+"{post_content}"
+
+---
+
+Write a friendly, genuine reply. If your expertise is relevant, you can mention it briefly, but prioritize being helpful and genuine over promotion."""
+
+    response = client.responses.create(
+        model=settings.openrouter_model,
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+
+    parsed = _parse_json_response(response.output_text, MastodonReplyContent)
+    return parsed.content
+
+
+def generate_replies_batch_with_rag(
+    posts: list[dict],
+    rag_context: str,
+) -> list[LLMReplyResponse]:
+    """
+    Generate replies for multiple posts using RAG context.
+
+    Args:
+        posts: List of dicts with 'content' and 'author' keys
+        rag_context: Retrieved context from the RAG system
+
+    Returns:
+        List of LLMReplyResponse objects in the same order as input posts
+    """
+    if not posts:
+        return []
+
+    client = _get_client()
+
+    # Format all posts for the batch request
+    posts_text = "\n\n".join(
+        f'Post {i + 1} by {p["author"]}:\n"{p["content"]}"' for i, p in enumerate(posts)
+    )
+
+    system_prompt = f"""You are a community engagement specialist writing replies to Mastodon posts on behalf of Octo NeuroAI, a company that generates AI experiments and automation workflows for cognitive-inspired AI.
+
+Your business context (for reference when relevant):
+{rag_context}
+
+Your replies should be:
+- Human, warm, and genuine
+- Supportive and connective
+- Brief (1-3 sentences typically)
+- Engaging with what the person actually said
+- Natural conversation, like a real person would respond
+
+When relevant, you can reference your expertise in cognitive-inspired AI and automation workflows, but ONLY if it naturally fits the conversation. Don't force it.
+
+You're building community and genuine connections. Never use corporate speak. Be a real person having a real conversation.
+
+Avoid emojis unless the original post clearly uses them.
+Do not include hashtags in replies.
+
+For each post, determine:
+- Whether mentioning your company/expertise would be appropriate (is_company_related)
+- A relevance score (0.0-1.0) for how relevant your expertise is to this topic
+- Brief reasoning for your approach
+- The actual response text (max 475 characters)
+
+You MUST respond with valid JSON in this exact format:
+{{
+  "responses": [
+    {{
+      "response_text": "Your reply text here (max 475 chars)",
+      "is_company_related": true or false,
+      "relevance_score": 0.0 to 1.0,
+      "reasoning": "Brief explanation"
+    }}
+  ]
+}}
+
+Return one response object per post, in the same order as the posts."""
+
+    user_prompt = f"""Generate responses for these {len(posts)} Mastodon posts. Return exactly {len(posts)} response(s) in order. Respond with JSON only.
+
+Posts to respond to:
+{posts_text}"""
+
+    response = client.chat.completions.create(
+        model=settings.openrouter_model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+
+    parsed = _parse_json_response(response.choices[0].message.content, LLMReplyBatch)
+    return parsed.responses
+
+
 def generate_image_prompt(post_content: str) -> str:
     """
     Generate an image prompt for a diffusion model based on post content.

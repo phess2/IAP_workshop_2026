@@ -3,10 +3,11 @@ import asyncio
 
 from pydantic import BaseModel
 
+from .llm import LLMReplyResponse, generate_replies_batch, generate_replies_batch_with_rag
+from .mastodon_client import MastodonPost, reply_to_status, search_posts
 from .notion_client import fetch_parent_page
-from .mastodon_client import search_posts, reply_to_status, MastodonPost
-from .llm import generate_replies_batch, LLMReplyResponse
-from .telegram_client import request_approval, store_rejection, Decision
+from .rag import embed_reply, retrieve_all_context
+from .telegram_client import Decision, request_approval, store_rejection
 
 # Number of posts to search for and generate replies to
 BATCH_SIZE = 5
@@ -75,6 +76,7 @@ def parse_keywords(keywords_str: str) -> list[str]:
 def create_generated_replies(
     posts: list[MastodonPost],
     business_context: str,
+    use_rag: bool = True,
 ) -> list[GeneratedReply]:
     """
     Generate replies for multiple posts using a single batch LLM call.
@@ -82,6 +84,7 @@ def create_generated_replies(
     Args:
         posts: List of MastodonPost objects to generate replies for
         business_context: Business description for tone/context
+        use_rag: If True, use RAG-enhanced reply generation
 
     Returns:
         List of GeneratedReply objects with full metadata
@@ -99,7 +102,14 @@ def create_generated_replies(
     ]
 
     try:
-        llm_responses = generate_replies_batch(posts_for_llm, business_context)
+        if use_rag:
+            # Build a combined query from all post contents for RAG context
+            combined_query = " ".join(p["content"][:100] for p in posts_for_llm)
+            rag_context, _ = retrieve_all_context(combined_query, top_k=5)
+            print(f"📚 Retrieved RAG context ({len(rag_context)} chars)")
+            llm_responses = generate_replies_batch_with_rag(posts_for_llm, rag_context)
+        else:
+            llm_responses = generate_replies_batch(posts_for_llm, business_context)
     except Exception as e:
         print(f"❌ Error in batch LLM call: {e}")
         return []
@@ -177,18 +187,36 @@ async def process_single_reply(
     try:
         result = reply_to_status(post.id, content_to_post)
         print(f"✅ Reply posted! URL: {result.url}")
+
+        # Store reply in vector database for future RAG retrieval
+        try:
+            embed_reply(
+                reply_content=content_to_post,
+                reply_id=result.id,
+                original_post_id=post.id,
+                metadata={
+                    "mastodon_url": result.url,
+                    "original_author": author,
+                    "relevance_score": generated_reply.relevance_score,
+                },
+            )
+            print("✅ Reply stored in vector database")
+        except Exception as embed_error:
+            print(f"⚠️ Failed to store reply in vector DB: {embed_error}")
+
         return True
     except Exception as e:
         print(f"❌ Error posting reply to {author}: {e}")
         return False
 
 
-async def async_main_with_keywords(keywords: list[str]) -> int:
+async def async_main_with_keywords(keywords: list[str], use_rag: bool = True) -> int:
     """
     Async main entry point for searching and replying to posts.
 
     Args:
         keywords: List of keywords to search for
+        use_rag: If True, use RAG-enhanced reply generation
 
     Returns:
         Number of replies made
@@ -198,6 +226,8 @@ async def async_main_with_keywords(keywords: list[str]) -> int:
         return 0
 
     print(f"🔍 Searching for posts with keywords: {', '.join(keywords)}")
+    if use_rag:
+        print("📚 RAG-enhanced reply generation enabled")
 
     # Load business context (for tone, not for promotion)
     print("📄 Loading business context from Notion...")
@@ -228,7 +258,7 @@ async def async_main_with_keywords(keywords: list[str]) -> int:
 
     # Generate replies for all posts in a single batch LLM call
     print(f"\n🤖 Generating replies for {len(posts)} posts in batch...")
-    generated_replies = create_generated_replies(posts, business_context)
+    generated_replies = create_generated_replies(posts, business_context, use_rag=use_rag)
 
     if not generated_replies:
         print("❌ Failed to generate any replies.")
@@ -283,11 +313,17 @@ async def async_main() -> None:
         required=True,
         help="Comma-separated keywords to search for (e.g., 'AI,startup,tech')",
     )
+    parser.add_argument(
+        "--no-rag",
+        action="store_true",
+        help="Disable RAG-enhanced reply generation",
+    )
 
     args = parser.parse_args()
     keywords = parse_keywords(args.keywords)
+    use_rag = not args.no_rag
 
-    await async_main_with_keywords(keywords)
+    await async_main_with_keywords(keywords, use_rag=use_rag)
 
 
 def main() -> None:

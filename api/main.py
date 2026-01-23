@@ -8,7 +8,7 @@ from pathlib import Path
 from .config import api_settings
 from .database import init_db
 from .schemas import HealthResponse
-from .routes import posts, replies, feedback, state, automation
+from .routes import posts, replies, feedback, state, automation, rag
 
 
 @asynccontextmanager
@@ -36,6 +36,7 @@ app.include_router(replies.router, prefix=api_settings.api_v1_prefix)
 app.include_router(feedback.router, prefix=api_settings.api_v1_prefix)
 app.include_router(state.router, prefix=api_settings.api_v1_prefix)
 app.include_router(automation.router, prefix=api_settings.api_v1_prefix)
+app.include_router(rag.router, prefix=api_settings.api_v1_prefix)
 
 
 @app.get("/", response_class=JSONResponse)

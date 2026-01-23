@@ -27,5 +27,16 @@ class Settings(BaseModel):
     database_path: str = os.environ.get("DATABASE_PATH", "data/workshop.db")
     database_dir: str = os.environ.get("DATABASE_DIR", "data")
 
+    # Vector database configuration
+    vector_db_path: str = os.environ.get("VECTOR_DB_PATH", "data/vector.db")
+
+    # RAG configuration
+    rag_keyword_weight: float = float(os.environ.get("RAG_KEYWORD_WEIGHT", "0.4"))
+    rag_semantic_weight: float = float(os.environ.get("RAG_SEMANTIC_WEIGHT", "0.6"))
+
+    # Listener configuration
+    notion_poll_interval: int = int(os.environ.get("NOTION_POLL_INTERVAL", "300"))
+    mastodon_poll_interval: int = int(os.environ.get("MASTODON_POLL_INTERVAL", "60"))
+
 
 settings = Settings()

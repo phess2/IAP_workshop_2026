@@ -3,13 +3,15 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from .notion_client import fetch_parent_page, fetch_child_pages, NotionPage
+from .config import settings
+from .llm import generate_image_prompt, generate_post, generate_post_with_rag
 from .mastodon_client import post_status, upload_media
-from .llm import generate_post, generate_image_prompt
+from .notion_client import NotionPage, fetch_child_pages, fetch_parent_page
+from .rag import embed_post, embed_single_notion_page, retrieve_business_context
 from .replicate_client import generate_image
-from .telegram_client import request_approval, store_rejection, Decision
+from .telegram_client import Decision, request_approval, store_rejection
 
-STATE_FILE = Path(".workshop1_state.json")
+STATE_FILE = Path(settings.database_dir) / ".workshop1_state.json"
 
 
 def load_state() -> dict:
@@ -111,6 +113,21 @@ async def process_post(
         result = post_status(content_to_post, media_ids=[media_id])
         print(f"✅ Posted! URL: {result.url}")
 
+        # Store post in vector database for future RAG retrieval
+        try:
+            embed_post(
+                post_content=content_to_post,
+                post_id=result.id,
+                metadata={
+                    "mastodon_url": result.url,
+                    "page_title": page.title,
+                    "page_id": page.id,
+                },
+            )
+            print("✅ Post stored in vector database")
+        except Exception as embed_error:
+            print(f"⚠️ Failed to store post in vector DB: {embed_error}")
+
         # Update state
         state["pages"][page.id] = {
             "title": page.title,
@@ -127,6 +144,22 @@ async def process_post(
         try:
             result = post_status(content_to_post)
             print(f"✅ Posted (text-only)! URL: {result.url}")
+
+            # Store post in vector database for future RAG retrieval
+            try:
+                embed_post(
+                    post_content=content_to_post,
+                    post_id=result.id,
+                    metadata={
+                        "mastodon_url": result.url,
+                        "page_title": page.title,
+                        "page_id": page.id,
+                    },
+                )
+                print("✅ Post stored in vector database")
+            except Exception as embed_error:
+                print(f"⚠️ Failed to store post in vector DB: {embed_error}")
+
             state["pages"][page.id] = {
                 "title": page.title,
                 "last_edited_time": page.last_edited_time.isoformat(),
@@ -139,9 +172,12 @@ async def process_post(
             return False
 
 
-async def async_main() -> int:
+async def async_main(use_rag: bool = True) -> int:
     """
     Async main entry point for generating posts from Notion updates.
+
+    Args:
+        use_rag: If True, use RAG-enhanced post generation with vector search
 
     Returns:
         Number of posts made
@@ -158,6 +194,15 @@ async def async_main() -> int:
 
     business_context = parent_page.content
 
+    # Embed the parent page for RAG if using RAG
+    if use_rag:
+        try:
+            print("📊 Embedding business description for RAG...")
+            chunks = embed_single_notion_page(parent_page)
+            print(f"✅ Embedded {chunks} chunk(s) from business description")
+        except Exception as e:
+            print(f"⚠️ Could not embed parent page: {e}")
+
     # Load child pages
     try:
         child_pages = fetch_child_pages()
@@ -169,6 +214,16 @@ async def async_main() -> int:
     if not child_pages:
         print("ℹ️  No child pages found.")
         return 0
+
+    # Embed all child pages for RAG if using RAG
+    if use_rag:
+        print("📊 Embedding child pages for RAG...")
+        for page in child_pages:
+            try:
+                chunks = embed_single_notion_page(page)
+                print(f"  • Embedded {chunks} chunk(s) from: {page.title}")
+            except Exception as e:
+                print(f"  ⚠️ Could not embed {page.title}: {e}")
 
     # Load state
     state = load_state()
@@ -191,11 +246,24 @@ async def async_main() -> int:
         print(f"\n🤖 Generating post for: {page.title}...")
 
         try:
-            post_content = generate_post(
-                business_context=business_context,
-                page_content=page.content,
-                page_title=page.title,
-            )
+            if use_rag:
+                # Retrieve RAG context for this page
+                query = f"{page.title} {page.content[:200]}"
+                rag_context, _ = retrieve_business_context(query, top_k=5)
+                print(f"📚 Retrieved RAG context ({len(rag_context)} chars)")
+
+                post_content = generate_post_with_rag(
+                    rag_context=rag_context,
+                    page_content=page.content,
+                    page_title=page.title,
+                )
+            else:
+                # Use original non-RAG generation
+                post_content = generate_post(
+                    business_context=business_context,
+                    page_content=page.content,
+                    page_title=page.title,
+                )
         except Exception as e:
             print(f"❌ Error generating post: {e}")
             continue
@@ -210,9 +278,14 @@ async def async_main() -> int:
     return posts_made
 
 
-def main() -> None:
-    """Main entry point - runs the async main function."""
-    asyncio.run(async_main())
+def main(use_rag: bool = True) -> None:
+    """
+    Main entry point - runs the async main function.
+
+    Args:
+        use_rag: If True, use RAG-enhanced post generation
+    """
+    asyncio.run(async_main(use_rag=use_rag))
 
 
 if __name__ == "__main__":

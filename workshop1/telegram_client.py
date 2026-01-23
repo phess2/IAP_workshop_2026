@@ -90,6 +90,8 @@ async def request_approval(
     content: str,
     context_info: str = "",
     content_type: str = "post",
+    source_title: Optional[str] = None,
+    original_content: Optional[str] = None,
 ) -> ApprovalResult:
     """
     Send content to Telegram for approval and wait for user decision.
@@ -98,10 +100,19 @@ async def request_approval(
         content: The post/reply content to approve
         context_info: Additional context to display (e.g., page title, author)
         content_type: Either "post" or "reply" for display purposes
+        source_title: Title of the source (page title, author handle, etc.)
+        original_content: The original content being replied to (for replies)
 
     Returns:
         ApprovalResult containing the decision and any edited content or feedback
     """
+    # Build context_info from source_title if not provided directly
+    if not context_info and source_title:
+        context_info = f"📄 Source: {source_title}"
+        if original_content:
+            # Truncate original content if too long
+            orig_preview = original_content[:200] + "..." if len(original_content) > 200 else original_content
+            context_info += f"\n\n💬 Original:\n{orig_preview}"
     # State for this approval request
     decision_result: Optional[Decision] = None
     edited_content: Optional[str] = None

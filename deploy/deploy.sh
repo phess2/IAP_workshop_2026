@@ -4,7 +4,7 @@
 set -e
 
 # Configuration
-VM_NAME="walker"
+VM_NAME="iap-workshop-vm"
 ZONE="us-east1-b"
 PROJECT="sundai-iap-phess"
 APP_DIR="/opt/iap-workshop"
