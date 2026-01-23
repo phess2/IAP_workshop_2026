@@ -64,7 +64,7 @@ async def health_check():
             db_status = "not_found"
     except Exception as e:
         db_status = f"error: {str(e)}"
-    
+
     return HealthResponse(
         status="healthy",
         database=db_status,
@@ -74,6 +74,7 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "api.main:app",
         host=api_settings.host,

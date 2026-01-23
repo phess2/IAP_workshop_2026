@@ -37,16 +37,18 @@ def create_reply(reply: ReplyCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{reply_id}", response_model=ReplyResponse)
-def update_reply(reply_id: int, reply_update: ReplyUpdate, db: Session = Depends(get_db)):
+def update_reply(
+    reply_id: int, reply_update: ReplyUpdate, db: Session = Depends(get_db)
+):
     """Update a reply."""
     reply = db.query(Reply).filter(Reply.id == reply_id).first()
     if not reply:
         raise HTTPException(status_code=404, detail="Reply not found")
-    
+
     update_data = reply_update.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(reply, key, value)
-    
+
     reply.updated_at = datetime.now()
     db.commit()
     db.refresh(reply)
@@ -59,7 +61,7 @@ def delete_reply(reply_id: int, db: Session = Depends(get_db)):
     reply = db.query(Reply).filter(Reply.id == reply_id).first()
     if not reply:
         raise HTTPException(status_code=404, detail="Reply not found")
-    
+
     db.delete(reply)
     db.commit()
     return None

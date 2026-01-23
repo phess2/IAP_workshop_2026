@@ -5,6 +5,7 @@ from .config import settings
 # make sure we set the replicate API token
 replicate.api_token = settings.replicate_api_token
 
+
 def generate_image(input_prompt: str) -> str:
     """Generate an image from a prompt."""
     input = {

@@ -142,7 +142,7 @@ async def process_post(
 async def async_main() -> int:
     """
     Async main entry point for generating posts from Notion updates.
-    
+
     Returns:
         Number of posts made
     """

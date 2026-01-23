@@ -39,7 +39,7 @@ def create_post(post: PostCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(existing)
         return existing
-    
+
     db_post = Post(**post.model_dump())
     db.add(db_post)
     db.commit()
@@ -53,11 +53,11 @@ def update_post(post_id: int, post_update: PostUpdate, db: Session = Depends(get
     post = db.query(Post).filter(Post.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    
+
     update_data = post_update.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(post, key, value)
-    
+
     post.updated_at = datetime.now()
     db.commit()
     db.refresh(post)
@@ -70,7 +70,7 @@ def delete_post(post_id: int, db: Session = Depends(get_db)):
     post = db.query(Post).filter(Post.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    
+
     db.delete(post)
     db.commit()
     return None

@@ -1,5 +1,6 @@
 from workshop1.replicate_client import generate_image
 
+
 def test_generate_image():
     """Test generating an image."""
     prompt = "OCTGUY octopus underwater photorealistic."

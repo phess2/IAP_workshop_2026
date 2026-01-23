@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List
 
 from ..database import get_db
 from ..models import State
@@ -36,7 +36,7 @@ def create_state(state: StateCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(existing)
         return existing
-    
+
     db_state = State(**state.model_dump())
     db.add(db_state)
     db.commit()
@@ -50,7 +50,7 @@ def update_state(key: str, state_update: StateUpdate, db: Session = Depends(get_
     state = db.query(State).filter(State.key == key).first()
     if not state:
         raise HTTPException(status_code=404, detail=f"State with key '{key}' not found")
-    
+
     state.value = state_update.value
     db.commit()
     db.refresh(state)
@@ -63,7 +63,7 @@ def delete_state(key: str, db: Session = Depends(get_db)):
     state = db.query(State).filter(State.key == key).first()
     if not state:
         raise HTTPException(status_code=404, detail=f"State with key '{key}' not found")
-    
+
     db.delete(state)
     db.commit()
     return None

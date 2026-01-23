@@ -1,14 +1,41 @@
 import argparse
 import asyncio
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from pydantic import BaseModel
 
 from .notion_client import fetch_parent_page
 from .mastodon_client import search_posts, reply_to_status, MastodonPost
-from .llm import generate_reply
+from .llm import generate_replies_batch, LLMReplyResponse
 from .telegram_client import request_approval, store_rejection, Decision
 
 # Number of posts to search for and generate replies to
 BATCH_SIZE = 5
+
+# Minimum relevance score to include a reply for approval
+MIN_RELEVANCE_SCORE = 0.3
+
+
+class GeneratedReply(BaseModel):
+    """Full reply with original post data and LLM response metadata."""
+
+    post: MastodonPost
+    response_text: str
+    is_company_related: bool
+    relevance_score: float
+    reasoning: str
+
+    @classmethod
+    def from_post_and_llm_response(
+        cls, post: MastodonPost, llm_response: LLMReplyResponse
+    ) -> "GeneratedReply":
+        """Create a GeneratedReply from a post and LLM response."""
+        return cls(
+            post=post,
+            response_text=llm_response.response_text,
+            is_company_related=llm_response.is_company_related,
+            relevance_score=llm_response.relevance_score,
+            reasoning=llm_response.reasoning,
+        )
 
 
 def print_post(post: MastodonPost, index: int = None, total: int = None) -> None:
@@ -45,49 +72,50 @@ def parse_keywords(keywords_str: str) -> list[str]:
     return [k.strip() for k in keywords_str.split(",") if k.strip()]
 
 
-def generate_replies_batch(
+def create_generated_replies(
     posts: list[MastodonPost],
     business_context: str,
-) -> list[tuple[MastodonPost, str]]:
+) -> list[GeneratedReply]:
     """
-    Generate replies for multiple posts concurrently using ThreadPoolExecutor.
+    Generate replies for multiple posts using a single batch LLM call.
 
     Args:
         posts: List of MastodonPost objects to generate replies for
         business_context: Business description for tone/context
 
     Returns:
-        List of (post, reply_content) tuples in the same order as input posts
+        List of GeneratedReply objects with full metadata
     """
-    results: dict[str, tuple[MastodonPost, str]] = {}
+    if not posts:
+        return []
 
-    with ThreadPoolExecutor(max_workers=BATCH_SIZE) as executor:
-        future_to_post = {
-            executor.submit(
-                generate_reply,
-                post.content,
-                post.author or post.author_handle,
-                business_context,
-            ): post
-            for post in posts
+    # Convert posts to the format expected by the LLM batch function
+    posts_for_llm = [
+        {
+            "content": post.content,
+            "author": post.author or post.author_handle,
         }
+        for post in posts
+    ]
 
-        for future in as_completed(future_to_post):
-            post = future_to_post[future]
-            try:
-                reply = future.result()
-                results[post.id] = (post, reply)
-            except Exception as e:
-                print(f"❌ Error generating reply for post {post.id}: {e}")
-                results[post.id] = (post, None)
+    try:
+        llm_responses = generate_replies_batch(posts_for_llm, business_context)
+    except Exception as e:
+        print(f"❌ Error in batch LLM call: {e}")
+        return []
 
-    # Return in original order
-    return [(post, results[post.id][1]) for post in posts if post.id in results]
+    # Combine posts with their LLM responses
+    generated_replies = []
+    for post, llm_response in zip(posts, llm_responses):
+        generated_replies.append(
+            GeneratedReply.from_post_and_llm_response(post, llm_response)
+        )
+
+    return generated_replies
 
 
 async def process_single_reply(
-    post: MastodonPost,
-    reply_content: str,
+    generated_reply: GeneratedReply,
     index: int,
     total: int,
 ) -> bool:
@@ -95,18 +123,26 @@ async def process_single_reply(
     Process a single reply through Telegram approval workflow.
 
     Args:
-        post: The Mastodon post being replied to
-        reply_content: The generated reply content
+        generated_reply: The GeneratedReply with post data and LLM response metadata
         index: Current reply index (1-based)
         total: Total number of replies
 
     Returns:
         True if reply was posted, False otherwise
     """
+    post = generated_reply.post
+    reply_content = generated_reply.response_text
     author = post.author or post.author_handle
+
+    # Build context info with metadata for Telegram approval
+    original_preview = post.content[:150] + ("..." if len(post.content) > 150 else "")
+    company_indicator = "Yes" if generated_reply.is_company_related else "No"
+
     context_info = (
         f"[{index}/{total}] 👤 Replying to: {author}\n"
-        f"📝 Original: {post.content[:150]}{'...' if len(post.content) > 150 else ''}"
+        f"📝 Original: {original_preview}\n"
+        f"📊 Relevance: {generated_reply.relevance_score:.0%} | Company mention: {company_indicator}\n"
+        f"💭 Reasoning: {generated_reply.reasoning[:100]}{'...' if len(generated_reply.reasoning) > 100 else ''}"
     )
 
     # Request approval via Telegram
@@ -150,10 +186,10 @@ async def process_single_reply(
 async def async_main_with_keywords(keywords: list[str]) -> int:
     """
     Async main entry point for searching and replying to posts.
-    
+
     Args:
         keywords: List of keywords to search for
-        
+
     Returns:
         Number of replies made
     """
@@ -190,18 +226,34 @@ async def async_main_with_keywords(keywords: list[str]) -> int:
 
     print(f"✅ Found {len(posts)} post(s)")
 
-    # Generate replies for all posts concurrently
-    print(f"\n🤖 Generating replies for {len(posts)} posts concurrently...")
-    post_reply_pairs = generate_replies_batch(posts, business_context)
+    # Generate replies for all posts in a single batch LLM call
+    print(f"\n🤖 Generating replies for {len(posts)} posts in batch...")
+    generated_replies = create_generated_replies(posts, business_context)
 
-    # Filter out failed generations
-    successful_pairs = [(post, reply) for post, reply in post_reply_pairs if reply]
-
-    if not successful_pairs:
+    if not generated_replies:
         print("❌ Failed to generate any replies.")
         return 0
 
-    print(f"✅ Generated {len(successful_pairs)} replies\n")
+    print(f"✅ Generated {len(generated_replies)} replies")
+
+    # Filter by relevance score
+    relevant_replies = [
+        reply
+        for reply in generated_replies
+        if reply.relevance_score >= MIN_RELEVANCE_SCORE
+    ]
+
+    filtered_count = len(generated_replies) - len(relevant_replies)
+    if filtered_count > 0:
+        print(
+            f"🔍 Filtered out {filtered_count} low-relevance replies (score < {MIN_RELEVANCE_SCORE})"
+        )
+
+    if not relevant_replies:
+        print("ℹ️  No replies passed the relevance threshold.")
+        return 0
+
+    print(f"📊 {len(relevant_replies)} replies ready for approval\n")
 
     # Process each reply one at a time via Telegram
     print("\n" + "=" * 60)
@@ -210,9 +262,9 @@ async def async_main_with_keywords(keywords: list[str]) -> int:
 
     replies_made = 0
 
-    for i, (post, reply) in enumerate(successful_pairs, 1):
-        print(f"\n[{i}/{len(successful_pairs)}] Processing reply...")
-        if await process_single_reply(post, reply, i, len(successful_pairs)):
+    for i, generated_reply in enumerate(relevant_replies, 1):
+        print(f"\n[{i}/{len(relevant_replies)}] Processing reply...")
+        if await process_single_reply(generated_reply, i, len(relevant_replies)):
             replies_made += 1
 
     print(f"\n🎉 Done! Made {replies_made} reply(ies).")
@@ -234,7 +286,7 @@ async def async_main() -> None:
 
     args = parser.parse_args()
     keywords = parse_keywords(args.keywords)
-    
+
     await async_main_with_keywords(keywords)
 
 

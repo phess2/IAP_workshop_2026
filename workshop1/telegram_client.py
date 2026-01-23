@@ -238,8 +238,12 @@ async def request_approval_batch(
     """
     # State for batch approval
     results: dict[str, ApprovalResult] = {}
-    pending: dict[int, tuple[str, str, dict]] = {}  # message_id -> (item_id, content, metadata)
-    waiting_for_text: dict[int, tuple[str, str]] = {}  # chat message context -> (item_id, "edit"/"feedback")
+    pending: dict[
+        int, tuple[str, str, dict]
+    ] = {}  # message_id -> (item_id, content, metadata)
+    waiting_for_text: dict[
+        int, tuple[str, str]
+    ] = {}  # chat message context -> (item_id, "edit"/"feedback")
     decisions_remaining = len(items)
     all_done = asyncio.Event()
 
@@ -303,9 +307,7 @@ async def request_approval_batch(
             await update.message.reply_text("📝 Updated content received for item!")
 
         elif text_type == "feedback":
-            results[item_id] = ApprovalResult(
-                decision=Decision.REJECT, feedback=text
-            )
+            results[item_id] = ApprovalResult(decision=Decision.REJECT, feedback=text)
             await update.message.reply_text(f"📝 Feedback recorded: {text}")
 
         del waiting_for_text[message_id]

@@ -81,6 +81,51 @@ class MastodonReplyContent(BaseModel):
         return v
 
 
+class LLMReplyResponse(BaseModel):
+    """LLM-generated response for a single post in a batch."""
+
+    response_text: str = Field(
+        ...,
+        description="The reply content for Mastodon, max 475 characters",
+    )
+    is_company_related: bool = Field(
+        ...,
+        description="Whether mentioning the company/business would be appropriate",
+    )
+    relevance_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="How relevant our expertise is to this post (0.0-1.0)",
+    )
+    reasoning: str = Field(
+        ...,
+        description="Brief explanation of why this response was crafted this way",
+    )
+
+    @field_validator("response_text")
+    @classmethod
+    def validate_response_length(cls, v: str) -> str:
+        """Ensure response doesn't exceed Mastodon's character limit."""
+        v = v.strip()
+        if len(v) > MASTODON_MAX_CHARS:
+            truncated = v[: MASTODON_MAX_CHARS - 3]
+            last_space = truncated.rfind(" ")
+            if last_space > MASTODON_MAX_CHARS - 50:
+                truncated = truncated[:last_space]
+            return truncated + "..."
+        return v
+
+
+class LLMReplyBatch(BaseModel):
+    """Batch of LLM responses for multiple posts."""
+
+    responses: list[LLMReplyResponse] = Field(
+        ...,
+        description="List of responses, one per input post in the same order",
+    )
+
+
 def _get_client() -> OpenAI:
     """Get OpenAI client configured for OpenRouter."""
     return OpenAI(
@@ -208,6 +253,88 @@ def generate_reply(
     return parsed.content
 
 
+def generate_replies_batch(
+    posts: list[dict],
+    business_context: str,
+) -> list[LLMReplyResponse]:
+    """
+    Generate replies for multiple posts in a single batch LLM call.
+
+    Uses JSON output parsing to get consistent, validated responses for all posts
+    in one API call, which is more efficient than multiple individual calls.
+
+    Args:
+        posts: List of dicts with 'content' and 'author' keys
+        business_context: Business description for tone/context (not for promotion)
+
+    Returns:
+        List of LLMReplyResponse objects in the same order as input posts
+    """
+    if not posts:
+        return []
+
+    client = _get_client()
+
+    # Format all posts for the batch request
+    posts_text = "\n\n".join(
+        f'Post {i + 1} by {p["author"]}:\n"{p["content"]}"' for i, p in enumerate(posts)
+    )
+
+    system_prompt = f"""You are a community engagement specialist writing replies to Mastodon posts.
+
+Your business context (for understanding your perspective, NOT for promotion):
+{business_context}
+
+Your replies should be:
+- Human, warm, and genuine
+- Supportive and connective
+- Brief (1-3 sentences typically)
+- NOT promotional - do not mention your business or products unless truly relevant
+- Engaging with what the person actually said
+- Natural conversation, like a real person would respond
+
+You're building community and genuine connections, not selling anything.
+Never use corporate speak. Be a real person having a real conversation.
+Avoid emojis unless the original post clearly uses them.
+Do not include hashtags.
+
+For each post, determine:
+- Whether mentioning your company/business would be appropriate (is_company_related)
+- A relevance score (0.0-1.0) for how relevant your expertise is to this topic
+- Brief reasoning for your approach
+- The actual response text (max 475 characters)
+
+You MUST respond with valid JSON in this exact format:
+{{
+  "responses": [
+    {{
+      "response_text": "Your reply text here (max 475 chars)",
+      "is_company_related": true or false,
+      "relevance_score": 0.0 to 1.0,
+      "reasoning": "Brief explanation"
+    }}
+  ]
+}}
+
+Return one response object per post, in the same order as the posts."""
+
+    user_prompt = f"""Generate responses for these {len(posts)} Mastodon posts. Return exactly {len(posts)} response(s) in order. Respond with JSON only.
+
+Posts to respond to:
+{posts_text}"""
+
+    response = client.chat.completions.create(
+        model=settings.openrouter_model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+
+    parsed = _parse_json_response(response.choices[0].message.content, LLMReplyBatch)
+    return parsed.responses
+
+
 class ImagePromptContent(BaseModel):
     """Validated image prompt content."""
 
@@ -261,10 +388,10 @@ def generate_image_prompt(post_content: str) -> str:
     )
 
     parsed = _parse_json_response(response.output_text, ImagePromptContent)
-    
+
     # Ensure prompt starts with "OCTGUY octopus" (fallback if LLM doesn't follow instructions)
     prompt = parsed.prompt.strip()
     if not prompt.lower().startswith("octguy octopus"):
         prompt = f"OCTGUY octopus {prompt}"
-    
+
     return prompt

@@ -30,7 +30,7 @@ class PostResponse(PostBase):
     created_at: datetime
     updated_at: datetime
     posted_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True
 
@@ -64,7 +64,7 @@ class ReplyResponse(ReplyBase):
     created_at: datetime
     updated_at: datetime
     posted_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True
 
@@ -85,7 +85,7 @@ class FeedbackCreate(FeedbackBase):
 class FeedbackResponse(FeedbackBase):
     id: int
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -108,7 +108,7 @@ class StateResponse(StateBase):
     id: int
     created_at: datetime
     updated_at: datetime
-    
+
     class Config:
         from_attributes = True
 
