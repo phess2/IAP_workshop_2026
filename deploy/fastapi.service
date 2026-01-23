@@ -1,0 +1,19 @@
+[Unit]
+Description=IAP 2026 Workshop FastAPI Application
+After=network.target
+
+[Service]
+Type=simple
+User=USERNAME_PLACEHOLDER
+Group=USERNAME_PLACEHOLDER
+WorkingDirectory=/opt/iap-workshop
+Environment="PATH=/opt/iap-workshop/.venv/bin:/home/USERNAME_PLACEHOLDER/.local/bin:/home/USERNAME_PLACEHOLDER/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=-/opt/iap-workshop/.env
+ExecStart=/opt/iap-workshop/.venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/iap-workshop/logs/fastapi.log
+StandardError=append:/opt/iap-workshop/logs/fastapi.error.log
+
+[Install]
+WantedBy=multi-user.target

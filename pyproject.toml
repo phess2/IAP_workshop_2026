@@ -12,6 +12,9 @@ dependencies = [
     "notion-client>=2.0.0",
     "replicate>=0.10.0",
     "python-telegram-bot>=21.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sqlalchemy>=2.0.0",
 ]
 
 [dependency-groups]

@@ -22,5 +22,9 @@ class Settings(BaseModel):
 
     telegram_bot_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.environ.get("TELEGRAM_CHAT_ID", "")
+    
+    # Database configuration
+    database_path: str = os.environ.get("DATABASE_PATH", "data/workshop.db")
+    database_dir: str = os.environ.get("DATABASE_DIR", "data")
 
 settings = Settings()

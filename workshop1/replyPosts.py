@@ -147,25 +147,19 @@ async def process_single_reply(
         return False
 
 
-async def async_main() -> None:
-    """Async main entry point for searching and replying to posts."""
-    parser = argparse.ArgumentParser(
-        description="Search Mastodon for posts and generate replies"
-    )
-    parser.add_argument(
-        "--keywords",
-        "-k",
-        type=str,
-        required=True,
-        help="Comma-separated keywords to search for (e.g., 'AI,startup,tech')",
-    )
-
-    args = parser.parse_args()
-    keywords = parse_keywords(args.keywords)
-
+async def async_main_with_keywords(keywords: list[str]) -> int:
+    """
+    Async main entry point for searching and replying to posts.
+    
+    Args:
+        keywords: List of keywords to search for
+        
+    Returns:
+        Number of replies made
+    """
     if not keywords:
         print("❌ Please provide at least one keyword.")
-        return
+        return 0
 
     print(f"🔍 Searching for posts with keywords: {', '.join(keywords)}")
 
@@ -188,11 +182,11 @@ async def async_main() -> None:
         posts = search_posts(keywords, limit=BATCH_SIZE)
     except Exception as e:
         print(f"❌ Error searching Mastodon: {e}")
-        return
+        return 0
 
     if not posts:
         print("ℹ️  No posts found matching your keywords.")
-        return
+        return 0
 
     print(f"✅ Found {len(posts)} post(s)")
 
@@ -205,7 +199,7 @@ async def async_main() -> None:
 
     if not successful_pairs:
         print("❌ Failed to generate any replies.")
-        return
+        return 0
 
     print(f"✅ Generated {len(successful_pairs)} replies\n")
 
@@ -222,6 +216,26 @@ async def async_main() -> None:
             replies_made += 1
 
     print(f"\n🎉 Done! Made {replies_made} reply(ies).")
+    return replies_made
+
+
+async def async_main() -> None:
+    """Async main entry point for CLI usage - parses arguments and calls async_main_with_keywords."""
+    parser = argparse.ArgumentParser(
+        description="Search Mastodon for posts and generate replies"
+    )
+    parser.add_argument(
+        "--keywords",
+        "-k",
+        type=str,
+        required=True,
+        help="Comma-separated keywords to search for (e.g., 'AI,startup,tech')",
+    )
+
+    args = parser.parse_args()
+    keywords = parse_keywords(args.keywords)
+    
+    await async_main_with_keywords(keywords)
 
 
 def main() -> None:

@@ -139,8 +139,13 @@ async def process_post(
             return False
 
 
-async def async_main() -> None:
-    """Async main entry point for generating posts from Notion updates."""
+async def async_main() -> int:
+    """
+    Async main entry point for generating posts from Notion updates.
+    
+    Returns:
+        Number of posts made
+    """
     print("🔄 Loading Notion pages...")
 
     # Load business description (parent page)
@@ -149,7 +154,7 @@ async def async_main() -> None:
         print(f"✅ Loaded business description: {parent_page.title}")
     except Exception as e:
         print(f"❌ Error loading parent page: {e}")
-        return
+        return 0
 
     business_context = parent_page.content
 
@@ -159,11 +164,11 @@ async def async_main() -> None:
         print(f"✅ Found {len(child_pages)} child pages")
     except Exception as e:
         print(f"❌ Error loading child pages: {e}")
-        return
+        return 0
 
     if not child_pages:
         print("ℹ️  No child pages found.")
-        return
+        return 0
 
     # Load state
     state = load_state()
@@ -173,7 +178,7 @@ async def async_main() -> None:
 
     if not updated_pages:
         print("ℹ️  No new or updated pages since last run.")
-        return
+        return 0
 
     print(f"\n📬 Found {len(updated_pages)} page(s) with updates:\n")
     for page in updated_pages:
@@ -202,6 +207,7 @@ async def async_main() -> None:
             posts_made += 1
 
     print(f"\n🎉 Done! Made {posts_made} post(s).")
+    return posts_made
 
 
 def main() -> None:
